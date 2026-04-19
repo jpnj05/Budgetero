@@ -1,0 +1,46 @@
+{
+  "project_info": {
+    "project_number": "824513032981",
+    "project_id": "budget-ai-f2a28",
+    "storage_bucket": "budget-ai-f2a28.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:824513032981:android:37c2cb18a3bca11b882f1c",
+        "android_client_info": {
+          "package_name": "com.example.budgeting_ai"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "824513032981-ql3rtfvpm4loa761qfp11gi1ljtu5f9d.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC0XEdl3m8RRz0T2ZKWGGhiohyz8q-UIlk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "824513032981-ql3rtfvpm4loa761qfp11gi1ljtu5f9d.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "824513032981-i9vdsmoiuf4c1hrc922mie6aeqvpo9nf.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.budgetingAi"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

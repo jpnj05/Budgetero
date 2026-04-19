@@ -1,0 +1,50 @@
+# ─── Secrets — NEVER commit these ───────────────────────────
+.env
+*.env
+dart_defines.json
+secrets.json
+local.properties
+
+# ─── Flutter/Dart ─────────────────────────────────────────────
+**/doc/api/
+**/ios/Flutter/.last_build_id
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+/build/
+/coverage/
+
+# ─── Android ──────────────────────────────────────────────────
+/android/app/debug/
+/android/app/profile/
+/android/app/release/
+android/local.properties
+android/.gradle/
+*.jks
+*.keystore
+
+# ─── iOS ──────────────────────────────────────────────────────
+**/ios/Pods/
+**/ios/.symlinks/
+ios/Flutter/flutter_export_environment.sh
+
+# ─── Misc ─────────────────────────────────────────────────────
+*.class
+*.log
+*.pyc
+*.swp
+.DS_Store
+.atom/
+.build/
+.buildlog/
+.history
+.svn/
+.swiftpm/
+.idea/
+*.iml
+*.ipr
+*.iws
+app.*.symbols
+app.*.map.json
