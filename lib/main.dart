@@ -338,6 +338,62 @@ class _ChatState extends State<ChatScreen> {
   bool _tryLocalIntent(String input) {
     final lower = input.toLowerCase().trim();
 
+    // ── CLEAR BUDGET ONLY ────────────────────────────────
+    // Handles: "remove budget", "clear budget", "delete budget",
+    //          "reset budget", "remove my budget", "wala na budget"
+    if (RegExp(r'(remove|clear|delete|reset|wala)\s+(my\s+)?budget|(budget)\s+(remove|clear|delete|reset)')
+        .hasMatch(lower)) {
+      budget = 0;
+      saveAll();
+      refreshNotifier.value++;
+      _addBot("🗑️ Budget cleared! Your expenses are still saved. Set a new budget anytime.");
+      return true;
+    }
+
+    // ── SET DAILY / WEEKLY LIMIT ─────────────────────────
+    // Handles: "set my daily limit to 200", "daily limit 300",
+    //          "set weekly limit 1000", "reset my daily limit"
+    if (lower.contains('daily limit') || lower.contains('limit daily')) {
+      if (lower.contains('reset') || lower.contains('remove') || lower.contains('clear')) {
+        customDailyLimit = 0;
+        saveAll();
+        refreshNotifier.value++;
+        _addBot("✅ Daily limit removed from dashboard.");
+        return true;
+      }
+      final numMatch = RegExp(r'[\d,]+(?:\.\d+)?').firstMatch(lower);
+      if (numMatch != null) {
+        final amt = double.tryParse(numMatch.group(0)!.replaceAll(',', ''));
+        if (amt != null && amt > 0) {
+          customDailyLimit = amt;
+          saveAll();
+          refreshNotifier.value++;
+          _addBot("✅ Daily limit set to **\u20B1${amt.toStringAsFixed(0)}/day** on your dashboard!");
+          return true;
+        }
+      }
+    }
+    if (lower.contains('weekly limit') || lower.contains('limit weekly')) {
+      if (lower.contains('reset') || lower.contains('remove') || lower.contains('clear')) {
+        customWeeklyLimit = 0;
+        saveAll();
+        refreshNotifier.value++;
+        _addBot("✅ Weekly limit removed from dashboard.");
+        return true;
+      }
+      final numMatch = RegExp(r'[\d,]+(?:\.\d+)?').firstMatch(lower);
+      if (numMatch != null) {
+        final amt = double.tryParse(numMatch.group(0)!.replaceAll(',', ''));
+        if (amt != null && amt > 0) {
+          customWeeklyLimit = amt;
+          saveAll();
+          refreshNotifier.value++;
+          _addBot("✅ Weekly limit set to **\u20B1${amt.toStringAsFixed(0)}/week** on your dashboard!");
+          return true;
+        }
+      }
+    }
+
     // ── SET BUDGET ───────────────────────────────────────
     // Handles: "Budget 1000", "my budget is 5000", "1000 budget",
     //          "set budget 3000", "set 2000 budget", "budget = 500"
@@ -444,7 +500,7 @@ NEW USER MESSAGE: $userMessage
 
 YOUR JOB: Return a single JSON object (no markdown fences, no extra text):
 {
-  "action": "add_expense|set_budget|set_daily_limit|query|delete|delete_category|edit_expense|rename_category|clear_expenses|clear_all|chat",
+  "action": "add_expense|set_budget|set_daily_limit|query|delete|delete_category|edit_expense|rename_category|clear_expenses|clear_budget|clear_all|chat",
   "reply": "warm natural response",
   "data": {}
 }
@@ -464,7 +520,7 @@ ACTIONS:
             "what if 1000 per week, update my dashboard" -> daily:null, weekly:1000
             "reset my daily limit" -> daily:0, weekly:null
             "set daily 150 and weekly 800" -> daily:150, weekly:800
-- clear_expenses, clear_all, chat: data = {}
+- clear_expenses, clear_budget, clear_all, chat: data = {}
 
 EDIT RULES:
 - edit_expense: match_item is the CURRENT item name (or partial). Set only the fields that change; leave others null.
@@ -743,6 +799,15 @@ Return ONLY the JSON object, nothing else.
           _addBot(reply.isNotEmpty
               ? reply
               : "All expenses cleared! Budget of \u20B1${budget.toStringAsFixed(0)} is still set.");
+          break;
+
+        case "clear_budget":
+          budget = 0;
+          await saveAll();
+          refreshNotifier.value++;
+          _addBot(reply.isNotEmpty
+              ? reply
+              : "🗑️ Budget cleared! Your expenses are still saved. Set a new budget anytime.");
           break;
 
         case "clear_all":
@@ -1397,17 +1462,17 @@ class DashboardScreen extends StatelessWidget {
               ]),
               const SizedBox(height: 16),
 
-              // ── Daily & Weekly Spending Limit Card ──
+              // ── Spending Limit Card ──
               if (budget > 0) ...[
-                Builder(builder: (ctx) {
+                StatefulBuilder(builder: (ctx, ss) {
                   final now2        = DateTime.now();
                   final daysInMonth = DateUtils.getDaysInMonth(now2.year, now2.month);
                   final daysLeft    = daysInMonth - now2.day + 1;
 
                   // Days left in current week (Mon-Sun), capped to month end
-                  final weekdayNum  = now2.weekday; // 1=Mon, 7=Sun
-                  final daysToEndOfWeek = 7 - weekdayNum + 1; // days left incl. today
-                  final daysLeftWeek = daysToEndOfWeek.clamp(1, daysLeft);
+                  final weekdayNum      = now2.weekday;
+                  final daysToEndOfWeek = 7 - weekdayNum + 1;
+                  final daysLeftWeek    = daysToEndOfWeek.clamp(1, daysLeft);
 
                   final todaySpent = expenses
                       .where((e) {
@@ -1416,7 +1481,7 @@ class DashboardScreen extends StatelessWidget {
                       })
                       .fold(0.0, (s, e) => s + (e['amount'] as num));
 
-                  final weekStart  = DateTime(now2.year, now2.month, now2.day)
+                  final weekStart = DateTime(now2.year, now2.month, now2.day)
                       .subtract(Duration(days: now2.weekday - 1));
                   final thisWeekSpent = expenses
                       .where((e) {
@@ -1425,20 +1490,30 @@ class DashboardScreen extends StatelessWidget {
                       })
                       .fold(0.0, (s, e) => s + (e['amount'] as num));
 
-                  final remaining2    = budget - total;
-                  final autoDailyLimit  = remaining2 > 0 ? remaining2 / daysLeft : 0.0;
-                  final autoWeeklyLimit = remaining2 > 0 ? remaining2 / (daysLeft / 7).ceil() : 0.0;
-                  // Use custom limits if set, otherwise fall back to auto-calculated
-                  final dailyLimit  = customDailyLimit  > 0 ? customDailyLimit  : autoDailyLimit;
-                  final weeklyLimit = customWeeklyLimit > 0 ? customWeeklyLimit : autoWeeklyLimit;
+                  final remaining2      = budget - total;
+                  final autoMonthlyLimit = budget.toDouble();
+
+                  // Only show a limit if the user explicitly set one;
+                  // otherwise fall back to the full budget so the period
+                  // limit makes sense on its own (not a month-derived projection).
+                  final dailyLimit   = customDailyLimit  > 0 ? customDailyLimit  : budget;
+                  final weeklyLimit  = customWeeklyLimit > 0 ? customWeeklyLimit : budget;
+                  final monthlyLimit = autoMonthlyLimit;
+
                   final isCustomDaily  = customDailyLimit  > 0;
                   final isCustomWeekly = customWeeklyLimit > 0;
-                  final isOver      = remaining2 < 0;
+                  final isOver = remaining2 < 0;
 
-                  final dayColor  = isOver ? kRed : todaySpent > dailyLimit  ? const Color(0xFFFFC107) : kGreen;
-                  final weekColor = isOver ? kRed : thisWeekSpent > weeklyLimit ? const Color(0xFFFFC107) : kGreen;
-                  final cardColor = isOver ? kRed : (todaySpent > dailyLimit || thisWeekSpent > weeklyLimit)
+                  final dayColor   = isOver ? kRed : (isCustomDaily  && todaySpent   > dailyLimit)  ? const Color(0xFFFFC107) : isCustomDaily  ? kGreen : (pct > 0.9 ? kRed : pct > 0.7 ? const Color(0xFFFFC107) : kGreen);
+                  final weekColor  = isOver ? kRed : (isCustomWeekly && thisWeekSpent > weeklyLimit) ? const Color(0xFFFFC107) : isCustomWeekly ? kGreen : (pct > 0.9 ? kRed : pct > 0.7 ? const Color(0xFFFFC107) : kGreen);
+                  final monthColor = isOver ? kRed : pct > 0.9 ? kRed : pct > 0.7 ? const Color(0xFFFFC107) : kGreen;
+                  final cardColor  = isOver ? kRed : (monthColor == kRed || dayColor == const Color(0xFFFFC107) || weekColor == const Color(0xFFFFC107))
                       ? const Color(0xFFFFC107) : kGreen;
+
+                  // Selected period: 0=Today, 1=Week, 2=Month
+                  // Use a persistent index stored in a local variable via StatefulBuilder
+                  // We'll use a closure variable captured across rebuilds via ss
+                  // (Flutter StatefulBuilder ss can hold state via setState)
 
                   return Container(
                     margin: const EdgeInsets.only(bottom: 16),
@@ -1448,121 +1523,25 @@ class DashboardScreen extends StatelessWidget {
                       borderRadius: BorderRadius.circular(14),
                       border: Border.all(color: cardColor.withValues(alpha: 0.35), width: 1.2),
                     ),
-                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                      // ── Header ──
-                      Row(children: [
-                        Container(
-                          width: 32, height: 32,
-                          decoration: BoxDecoration(
-                            color: cardColor.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(9),
-                          ),
-                          child: Icon(
-                            isOver ? Icons.warning_rounded : Icons.event_note_rounded,
-                            color: cardColor, size: 17,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Text(
-                          isOver ? "Over Budget" : "Spending Limits",
-                          style: const TextStyle(color: kText, fontWeight: FontWeight.w600, fontSize: 13),
-                        ),
-                        const Spacer(),
-                        Text(
-                          "₱${remaining2.abs().toStringAsFixed(0)} ${isOver ? 'over' : 'left'}",
-                          style: TextStyle(color: cardColor, fontSize: 11, fontWeight: FontWeight.w600),
-                        ),
-                      ]),
-
-                      if (isOver) ...[
-                        const SizedBox(height: 8),
-                        Text(
-                          "You've exceeded your budget by ₱${remaining2.abs().toStringAsFixed(0)}. Avoid new expenses!",
-                          style: const TextStyle(color: kTextSub, fontSize: 11, height: 1.5),
-                        ),
-                      ] else ...[
-                        const SizedBox(height: 12),
-                        // ── Divider ──
-                        Container(height: 1, color: const Color(0xFF2A2D3E)),
-                        const SizedBox(height: 12),
-
-                        // ── Daily row ──
-                        Row(children: [
-                          Container(
-                            width: 28, height: 28,
-                            decoration: BoxDecoration(
-                              color: dayColor.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Icon(Icons.today_rounded, color: dayColor, size: 14),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Row(children: [
-                              const Text("Today's limit", style: TextStyle(color: kTextSub, fontSize: 11)),
-                              if (isCustomDaily) ...[
-                                const SizedBox(width: 5),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                                  decoration: BoxDecoration(
-                                    color: kAccent.withValues(alpha: 0.18),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: const Text("custom", style: TextStyle(color: kAccentLight, fontSize: 9, fontWeight: FontWeight.w600)),
-                                ),
-                              ],
-                            ]),
-                            Text(
-                              "Spent ₱${todaySpent.toStringAsFixed(0)} · $daysLeft day${daysLeft == 1 ? '' : 's'} left in month",
-                              style: const TextStyle(color: kTextSub, fontSize: 10),
-                            ),
-                          ])),
-                          Text(
-                            "₱${dailyLimit.toStringAsFixed(0)} / day",
-                            style: TextStyle(color: dayColor, fontWeight: FontWeight.bold, fontSize: 14),
-                          ),
-                        ]),
-
-                        const SizedBox(height: 10),
-
-                        // ── Weekly row ──
-                        Row(children: [
-                          Container(
-                            width: 28, height: 28,
-                            decoration: BoxDecoration(
-                              color: weekColor.withValues(alpha: 0.12),
-                              borderRadius: BorderRadius.circular(8),
-                            ),
-                            child: Icon(Icons.date_range_rounded, color: weekColor, size: 14),
-                          ),
-                          const SizedBox(width: 10),
-                          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                            Row(children: [
-                              const Text("This week's limit", style: TextStyle(color: kTextSub, fontSize: 11)),
-                              if (isCustomWeekly) ...[
-                                const SizedBox(width: 5),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-                                  decoration: BoxDecoration(
-                                    color: kAccent.withValues(alpha: 0.18),
-                                    borderRadius: BorderRadius.circular(4),
-                                  ),
-                                  child: const Text("custom", style: TextStyle(color: kAccentLight, fontSize: 9, fontWeight: FontWeight.w600)),
-                                ),
-                              ],
-                            ]),
-                            Text(
-                              "Spent ₱${thisWeekSpent.toStringAsFixed(0)} · $daysLeftWeek day${daysLeftWeek == 1 ? '' : 's'} left in week",
-                              style: const TextStyle(color: kTextSub, fontSize: 10),
-                            ),
-                          ])),
-                          Text(
-                            "₱${weeklyLimit.toStringAsFixed(0)} / week",
-                            style: TextStyle(color: weekColor, fontWeight: FontWeight.bold, fontSize: 14),
-                          ),
-                        ]),
-                      ],
-                    ]),
+                    child: _SpendingLimitsCardBody(
+                      isOver: isOver,
+                      cardColor: cardColor,
+                      remaining2: remaining2,
+                      todaySpent: todaySpent,
+                      thisWeekSpent: thisWeekSpent,
+                      monthSpent: total,
+                      dailyLimit: dailyLimit,
+                      weeklyLimit: weeklyLimit,
+                      monthlyLimit: monthlyLimit,
+                      daysLeft: daysLeft,
+                      daysLeftWeek: daysLeftWeek,
+                      dayColor: dayColor,
+                      weekColor: weekColor,
+                      monthColor: monthColor,
+                      isCustomDaily: isCustomDaily,
+                      isCustomWeekly: isCustomWeekly,
+                      pct: pct,
+                    ),
                   );
                 }),
               ],
@@ -1891,9 +1870,7 @@ class _EditableExpenseRow extends StatelessWidget {
               ),
               const SizedBox(width: 10),
               const Text("Edit Expense", style: TextStyle(color: kText, fontWeight: FontWeight.bold, fontSize: 17)),
-              const Spacer(),
-              const Text("Hold category card to rename it",
-                  style: TextStyle(color: kTextSub, fontSize: 10)),
+              const Spacer(),             
             ]),
             const SizedBox(height: 18),
             _EField("Item Name", itemCtrl, Icons.label_rounded),
@@ -1925,6 +1902,50 @@ class _EditableExpenseRow extends StatelessWidget {
                 ),
                 child: const Center(child: Text("Save Changes",
                     style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15))),
+              ),
+            ),
+            const SizedBox(height: 10),
+            GestureDetector(
+              onTap: () {
+                showDialog(
+                  context: ctx,
+                  builder: (dCtx) => AlertDialog(
+                    backgroundColor: kSurface,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                    title: const Text("Remove Expense", style: TextStyle(color: kText, fontWeight: FontWeight.bold, fontSize: 16)),
+                    content: Text(
+                      "Delete \"${expense["item"]}\" (₱${(expense["amount"] as num).toStringAsFixed(0)})? This cannot be undone.",
+                      style: const TextStyle(color: kTextSub, fontSize: 13, height: 1.5),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(dCtx),
+                        child: const Text("Cancel", style: TextStyle(color: kTextSub)),
+                      ),
+                      TextButton(
+                        onPressed: () {
+                          expenses.removeAt(idx);
+                          saveAll();
+                          refreshNotifier.value++;
+                          Navigator.pop(dCtx);
+                          Navigator.pop(ctx);
+                        },
+                        child: const Text("Delete", style: TextStyle(color: kRed, fontWeight: FontWeight.bold)),
+                      ),
+                    ],
+                  ),
+                );
+              },
+              child: Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(vertical: 13),
+                decoration: BoxDecoration(
+                  color: kRed.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: kRed.withValues(alpha: 0.35), width: 1),
+                ),
+                child: const Center(child: Text("Remove Expense",
+                    style: TextStyle(color: kRed, fontWeight: FontWeight.bold, fontSize: 15))),
               ),
             ),
           ]),
@@ -2073,6 +2094,306 @@ class _SummaryCard extends StatelessWidget {
   );
 }
 
+// ─── Spending Limits Card Body (with period tabs) ────────
+class _SpendingLimitsCardBody extends StatefulWidget {
+  final bool isOver;
+  final Color cardColor;
+  final double remaining2;
+  final double todaySpent, thisWeekSpent, monthSpent;
+  final double dailyLimit, weeklyLimit, monthlyLimit;
+  final int daysLeft, daysLeftWeek;
+  final Color dayColor, weekColor, monthColor;
+  final bool isCustomDaily, isCustomWeekly;
+  final double pct;
+
+  const _SpendingLimitsCardBody({
+    required this.isOver,
+    required this.cardColor,
+    required this.remaining2,
+    required this.todaySpent,
+    required this.thisWeekSpent,
+    required this.monthSpent,
+    required this.dailyLimit,
+    required this.weeklyLimit,
+    required this.monthlyLimit,
+    required this.daysLeft,
+    required this.daysLeftWeek,
+    required this.dayColor,
+    required this.weekColor,
+    required this.monthColor,
+    required this.isCustomDaily,
+    required this.isCustomWeekly,
+    required this.pct,
+  });
+
+  @override
+  State<_SpendingLimitsCardBody> createState() => _SpendingLimitsCardBodyState();
+}
+
+class _SpendingLimitsCardBodyState extends State<_SpendingLimitsCardBody> {
+  int _period = 0; // 0=Today, 1=Week, 2=Month
+
+  void _showSetLimitDialog(BuildContext ctx, int period) {
+    final isDaily  = period == 0;
+    final isWeekly = period == 1;
+    final isMonthly = period == 2;
+
+    final currentVal = isDaily
+        ? (customDailyLimit  > 0 ? customDailyLimit.toStringAsFixed(0)  : '')
+        : isWeekly
+            ? (customWeeklyLimit > 0 ? customWeeklyLimit.toStringAsFixed(0) : '')
+            : (budget > 0 ? budget.toStringAsFixed(0) : '');
+    final ctrl  = TextEditingController(text: currentVal);
+    final label  = isDaily ? 'Daily' : isWeekly ? 'Weekly' : 'Monthly Budget';
+    final suffix = isDaily ? '/day' : isWeekly ? '/week' : '/month';
+    final icon   = isDaily ? Icons.today_rounded : isWeekly ? Icons.date_range_rounded : Icons.calendar_month_rounded;
+
+    showDialog(
+      context: ctx,
+      builder: (dCtx) => AlertDialog(
+        backgroundColor: kSurface,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+        title: Row(children: [
+          Container(
+            width: 32, height: 32,
+            decoration: BoxDecoration(
+              color: kAccent.withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(9),
+            ),
+            child: Icon(icon, color: kAccentLight, size: 16),
+          ),
+          const SizedBox(width: 10),
+          Text("Set $label", style: const TextStyle(color: kText, fontWeight: FontWeight.bold, fontSize: 16)),
+        ]),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text(
+            isMonthly
+                ? "Update your total monthly budget."
+                : "How much do you want to limit your $label spending?",
+            style: const TextStyle(color: kTextSub, fontSize: 13, height: 1.5),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            controller: ctrl,
+            autofocus: true,
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
+            style: const TextStyle(color: kText, fontSize: 18, fontWeight: FontWeight.bold),
+            decoration: InputDecoration(
+              prefixText: '₱ ',
+              prefixStyle: const TextStyle(color: kAccentLight, fontSize: 18, fontWeight: FontWeight.bold),
+              hintText: '0',
+              hintStyle: TextStyle(color: kTextSub.withValues(alpha: 0.5)),
+              suffixText: suffix,
+              suffixStyle: const TextStyle(color: kTextSub, fontSize: 13),
+              filled: true,
+              fillColor: kSurface2,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none,
+              ),
+              focusedBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide(color: kAccent.withValues(alpha: 0.6), width: 1.5),
+              ),
+              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+            ),
+          ),
+        ]),
+        actions: [
+          // Remove limit button (only for daily/weekly when set)
+          if ((isDaily && customDailyLimit > 0) || (isWeekly && customWeeklyLimit > 0))
+            TextButton(
+              onPressed: () {
+                if (isDaily) { customDailyLimit = 0; }
+                else { customWeeklyLimit = 0; }
+                saveAll();
+                refreshNotifier.value++;
+                Navigator.pop(dCtx);
+              },
+              child: const Text("Remove", style: TextStyle(color: kRed)),
+            ),
+          TextButton(
+            onPressed: () => Navigator.pop(dCtx),
+            child: const Text("Cancel", style: TextStyle(color: kTextSub)),
+          ),
+          TextButton(
+            onPressed: () {
+              final amt = double.tryParse(ctrl.text.trim().replaceAll(',', ''));
+              if (amt != null && amt > 0) {
+                if (isDaily)       { customDailyLimit  = amt; }
+                else if (isWeekly) { customWeeklyLimit = amt; }
+                else               { budget            = amt; }
+                saveAll();
+                refreshNotifier.value++;
+              }
+              Navigator.pop(dCtx);
+            },
+            child: const Text("Save", style: TextStyle(color: kAccentLight, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final periods = ['Today', 'Week', 'Month'];
+    final periodColors = [widget.dayColor, widget.weekColor, widget.monthColor];
+    final periodAmounts = [widget.todaySpent, widget.thisWeekSpent, widget.monthSpent];
+    final periodIcons = [Icons.today_rounded, Icons.date_range_rounded, Icons.calendar_month_rounded];
+    final periodSubLabels = [
+      widget.isCustomDaily
+          ? 'Spent ₱${widget.todaySpent.toStringAsFixed(0)} · limit set to ₱${widget.dailyLimit.toStringAsFixed(0)}/day'
+          : 'Spent ₱${widget.todaySpent.toStringAsFixed(0)} today · no daily limit set',
+      widget.isCustomWeekly
+          ? 'Spent ₱${widget.thisWeekSpent.toStringAsFixed(0)} · ${widget.daysLeftWeek} day${widget.daysLeftWeek == 1 ? '' : 's'} left in week'
+          : 'Spent ₱${widget.thisWeekSpent.toStringAsFixed(0)} this week · no weekly limit set',
+      'Spent ₱${widget.monthSpent.toStringAsFixed(0)} of ₱${widget.monthlyLimit.toStringAsFixed(0)} budget',
+    ];
+    // Show "not set" label when no custom limit defined for today/week
+    final periodLimitDisplay = [
+      widget.isCustomDaily  ? '₱${widget.dailyLimit.toStringAsFixed(0)} / day'   : 'Not set',
+      widget.isCustomWeekly ? '₱${widget.weeklyLimit.toStringAsFixed(0)} / week'  : 'Not set',
+      '₱${widget.monthlyLimit.toStringAsFixed(0)} / month',
+    ];
+
+    final selColor = periodColors[_period];
+
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      // ── Header ──
+      Row(children: [
+        Container(
+          width: 32, height: 32,
+          decoration: BoxDecoration(
+            color: widget.cardColor.withValues(alpha: 0.15),
+            borderRadius: BorderRadius.circular(9),
+          ),
+          child: Icon(
+            widget.isOver ? Icons.warning_rounded : Icons.event_note_rounded,
+            color: widget.cardColor, size: 17,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          widget.isOver ? "Over Budget" : "Spending Limits",
+          style: const TextStyle(color: kText, fontWeight: FontWeight.w600, fontSize: 13),
+        ),
+        const Spacer(),
+        Text(
+          "₱${widget.remaining2.abs().toStringAsFixed(0)} ${widget.isOver ? 'over' : 'left'}",
+          style: TextStyle(color: widget.cardColor, fontSize: 11, fontWeight: FontWeight.w600),
+        ),
+      ]),
+
+      if (widget.isOver) ...[
+        const SizedBox(height: 8),
+        Text(
+          "You've exceeded your budget by ₱${widget.remaining2.abs().toStringAsFixed(0)}. Avoid new expenses!",
+          style: const TextStyle(color: kTextSub, fontSize: 11, height: 1.5),
+        ),
+      ] else ...[
+        const SizedBox(height: 12),
+
+        // ── Period Chip Row (selectable) ──
+        Row(children: List.generate(3, (i) {
+          final selected = _period == i;
+          final col = periodColors[i];
+          return Expanded(child: GestureDetector(
+            onTap: () => setState(() => _period = i),
+            child: AnimatedContainer(
+              duration: const Duration(milliseconds: 180),
+              margin: EdgeInsets.only(right: i < 2 ? 8 : 0),
+              padding: const EdgeInsets.symmetric(vertical: 8, horizontal: 6),
+              decoration: BoxDecoration(
+                color: selected ? col.withValues(alpha: 0.18) : col.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: selected ? col.withValues(alpha: 0.7) : col.withValues(alpha: 0.2),
+                  width: selected ? 1.4 : 1,
+                ),
+              ),
+              child: Column(children: [
+                Text(periods[i],
+                    style: TextStyle(
+                        color: selected ? col : kTextSub,
+                        fontSize: 10,
+                        fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
+                        letterSpacing: 0.3)),
+                const SizedBox(height: 3),
+                Text(
+                  "₱${periodAmounts[i].toStringAsFixed(0)}",
+                  style: TextStyle(
+                      color: col,
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ]),
+            ),
+          ));
+        })),
+
+        const SizedBox(height: 12),
+        Container(height: 1, color: const Color(0xFF2A2D3E)),
+        const SizedBox(height: 12),
+
+        // ── Selected Period Limit Row ──
+        Row(children: [
+          Container(
+            width: 28, height: 28,
+            decoration: BoxDecoration(
+              color: selColor.withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(8),
+            ),
+            child: Icon(periodIcons[_period], color: selColor, size: 14),
+          ),
+          const SizedBox(width: 10),
+          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+            Text(
+              "${periods[_period]}'s limit",
+              style: const TextStyle(color: kTextSub, fontSize: 11),
+            ),
+            Text(
+              periodSubLabels[_period],
+              style: const TextStyle(color: kTextSub, fontSize: 10),
+            ),
+          ])),
+          // Limit value
+          Text(
+            periodLimitDisplay[_period],
+            style: TextStyle(
+              color: (_period == 0 && !widget.isCustomDaily) || (_period == 1 && !widget.isCustomWeekly)
+                  ? kTextSub
+                  : selColor,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
+          ),
+          // Set / Edit button for all periods
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: () => _showSetLimitDialog(context, _period),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+              decoration: BoxDecoration(
+                color: kAccent.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: kAccent.withValues(alpha: 0.35), width: 1),
+              ),
+              child: Text(
+                _period == 2 ? "Edit" :
+                (_period == 0 && widget.isCustomDaily) || (_period == 1 && widget.isCustomWeekly)
+                    ? "Edit" : "Set",
+                style: const TextStyle(color: kAccentLight, fontSize: 11, fontWeight: FontWeight.w600),
+              ),
+            ),
+          ),
+        ]),
+      ],
+    ]);
+  }
+}
+
 // ─── Section Header ───────────────────────────────────────
 class _SectionHeader extends StatelessWidget {
   final String title;
@@ -2086,3 +2407,4 @@ class _SectionHeader extends StatelessWidget {
             fontSize: 14, letterSpacing: 0.3)),
   );
 }
+
